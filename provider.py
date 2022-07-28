@@ -32,7 +32,7 @@ def send_movement(addr_from, private_key, add_info):
         payload = {
             'from': addr_from,
             'place_id': add_info['place_id'],
-            'item_id': add_info['item_id'],
+            'product_id': add_info['product_id'],
             'signature': signature.decode(),
             'message': message
         }
@@ -88,12 +88,13 @@ def create_new_item_id(addr_from, private_key, item_id):
     print(res.text)
     
 
-def create_new_product(addr_from, private_key, item_id):
+def create_new_product(addr_from, private_key, item_id, place_id):
     signature, message = sign_ECDSA_msg(private_key, item_id, 'product')
     url = 'http://localhost:5000/new_product'
     register = {
         'from': addr_from,
         'item_id': item_id,
+        'place_id': place_id,
         'signature': signature.decode(),
         'message': message
     }
@@ -132,12 +133,13 @@ def wallet():
         elif response == '3':
             check_transactions()
         elif response == '4' and addr_from is not None:
-            item_id = input('Item id: ')
+            product_id = input('Product id: ')
             place_id = input('Place id: ')
-            send_movement(addr_from, private_key, {'item_id': item_id, 'place_id': place_id})
+            send_movement(addr_from, private_key, {'product_id': product_id, 'place_id': place_id})
         elif response == '5' and addr_from is not None:
             item_id = input('Item id: ')
             place_id = input('Starting place: ')
+            create_new_product(addr_from, private_key, item_id, place_id)
         elif response == '6' and addr_from is not None:
             item_id = input('new item id: ')
             create_new_item_id(addr_from, private_key, item_id)
