@@ -9,8 +9,7 @@ def generate_ECDSA_keys():
     sk = ecdsa.SigningKey.generate(curve=ecdsa.SECP256k1)
     private_key = sk.to_string().hex()
     public_key = sk.get_verifying_key().to_string().hex()
-    tmp = public_key.hex()
-    public_key = base64.b64encode(bytes.fromhex(tmp))
+    public_key = base64.b64encode(bytes.fromhex(public_key))
     filename = input('Write the name of your new address: ') + '.txt'
     with open(filename, 'w') as f:
         f.write(f'Private key: {private_key}\nWallet address / Public key: {public_key.decode()}')
@@ -18,7 +17,7 @@ def generate_ECDSA_keys():
     
     
 def sign_move_ECDSA_msg(private_key, add_info):
-    message = str(f'move_{round(time.time())}_{add_info["place_id"]}_{add_info["item_id"]}')
+    message = str(f'{add_info["type"]}_{round(time.time())}_{add_info["place_id"]}_{add_info["product_id"]}')
     bmessage = message.encode()
     sk = ecdsa.SigningKey.from_string(bytes.fromhex(private_key), curve=ecdsa.SECP256k1)
     signature = base64.b64encode(sk.sign(bmessage))
@@ -27,15 +26,29 @@ def sign_move_ECDSA_msg(private_key, add_info):
 
 def send_movement(addr_from, private_key, add_info):
     if len(private_key) == 64:
+        if add_info['type'] == 'product':
+            add_info['product_id'] = requests.get(url='http://localhost:5000/product_id', params={'update': addr_from}).content.decode('utf-8')
+        
         signature, message = sign_move_ECDSA_msg(private_key, add_info)
         url = 'http://localhost:5000/txion'
-        payload = {
-            'from': addr_from,
-            'place_id': add_info['place_id'],
-            'product_id': add_info['product_id'],
-            'signature': signature.decode(),
-            'message': message
-        }
+        
+        if add_info['type'] == 'product':
+            payload = {
+                'from': addr_from,
+                'place_id': add_info['place_id'],
+                'product_id': add_info['product_id'],
+                'item_id': add_info['item_id'],
+                'signature': signature.decode(),
+                'message': message
+            }
+        else:
+            payload = {
+                'from': addr_from,
+                'place_id': add_info['place_id'],
+                'product_id': add_info['product_id'],
+                'signature': signature.decode(),
+                'message': message
+            }
         headers = {'Content-Type': 'application/json'}
         res = requests.post(url, json=payload, headers=headers)
         print(res.text)
@@ -86,21 +99,6 @@ def create_new_item_id(addr_from, private_key, item_id):
     headers = {'Content-Type': 'application/json'}
     res = requests.post(url, json=register, headers=headers)
     print(res.text)
-    
-
-def create_new_product(addr_from, private_key, item_id, place_id):
-    signature, message = sign_ECDSA_msg(private_key, item_id, 'product')
-    url = 'http://localhost:5000/new_product'
-    register = {
-        'from': addr_from,
-        'item_id': item_id,
-        'place_id': place_id,
-        'signature': signature.decode(),
-        'message': message
-    }
-    headers = {'Content-Type': 'application/json'}
-    res = requests.post(url, json=register, headers=headers)
-    print(res.text)
         
         
 def wallet():
@@ -117,7 +115,9 @@ def wallet():
         5) Create new product
         6) Create new item
         7) Create new place
-        8) Check my products
+        8) Check my products где они находятся
+        9) Info about my Places
+        10) Info about my Items
         """)
         
         if response == '1':
@@ -135,11 +135,11 @@ def wallet():
         elif response == '4' and addr_from is not None:
             product_id = input('Product id: ')
             place_id = input('Place id: ')
-            send_movement(addr_from, private_key, {'product_id': product_id, 'place_id': place_id})
+            send_movement(addr_from, private_key, {'type': 'move', 'product_id': product_id, 'place_id': place_id})
         elif response == '5' and addr_from is not None:
             item_id = input('Item id: ')
             place_id = input('Starting place: ')
-            create_new_product(addr_from, private_key, item_id, place_id)
+            send_movement(addr_from, private_key, {'type': 'product', 'item_id': item_id, 'place_id': place_id})
         elif response == '6' and addr_from is not None:
             item_id = input('new item id: ')
             create_new_item_id(addr_from, private_key, item_id)

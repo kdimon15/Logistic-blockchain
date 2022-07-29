@@ -1,8 +1,6 @@
-from audioop import add
-import hashlib
 import time
 import requests
-from blockchain_cfg import PEER_NODES, MINER_ADDRESS, MINER_NODE_URL
+from blockchain_cfg import MINER_ADDRESS, MINER_NODE_URL
 import json
 from flask import Flask, request
 from multiprocessing import Process, Pipe
@@ -12,7 +10,7 @@ from block import Block
 
 
 def create_genesis_block():
-    genesis_block = Block(0, [], time.time(), '0', [], [], [])
+    genesis_block = Block(0, [], time.time(), '0', [], [])
     genesis_block.hash = genesis_block.compute_hash()
     return genesis_block
 
@@ -41,11 +39,8 @@ def mine(a, blockchain, node_pending_movements):
 
         ADDR_TO_ITEMS = requests.get(url=MINER_NODE_URL+'/new_item', params={'update': MINER_ADDRESS}).content
         ADDR_TO_ITEMS = json.loads(ADDR_TO_ITEMS)
-        
-        ADDR_TO_PRODUCTS = requests.get(url=MINER_NODE_URL+'/new_product', params={'update': MINER_ADDRESS}).content
-        ADDR_TO_PRODUCTS = json.loads(ADDR_TO_PRODUCTS)
 
-        if len(NODE_PENDING_MOVEMENTS)+len(ADDR_TO_PLACES)+len(ADDR_TO_ITEMS)+len(ADDR_TO_PRODUCTS) > 0:
+        if len(NODE_PENDING_MOVEMENTS)+len(ADDR_TO_PLACES)+len(ADDR_TO_ITEMS) > 0:
             
             for x in ADDR_TO_PRODUCTS:
                 NODE_PENDING_MOVEMENTS.append(x)
@@ -74,6 +69,23 @@ ADDR_TO_ITEMS = []
 ADDR_TO_PLACES = []
 ADDR_TO_PRODUCTS = []
 
+PRODUCTS_NOW = {}
+
+@app.route('/product_id', methods=['GET'])
+def get_product_id():
+    addr = request.args.get('update')
+    cur_id = 0
+    
+    for block in BLOCKCHAIN:
+        for move in block.movements:
+            if addr == move['from'] and int(move['product_id']) > cur_id:
+                cur_id = int(move['product_id'])
+                
+    if addr in PRODUCTS_NOW: PRODUCTS_NOW[addr] += 1
+    else: PRODUCTS_NOW[addr] = 1
+
+    return str(cur_id + PRODUCTS_NOW[addr])
+
 
 @app.route('/blocks', methods=['GET'])
 def get_blocks():
@@ -81,6 +93,9 @@ def get_blocks():
     if request.args.get('update') == MINER_ADDRESS:
         global BLOCKCHAIN
         BLOCKCHAIN = pipe_input.recv()
+        
+        global PRODUCTS_NOW
+        PRODUCTS_NOW = {}
 
     chain_to_send = BLOCKCHAIN
 
@@ -117,27 +132,25 @@ def validate_signature(public_key, signature, message):
 def transaction():
     if request.method == 'POST':
         new_txion = request.get_json()
-        
-        addr_places_dic = {}
-        addr_items_dic = {}
-        addr_products_dic = {}
+
+        places_list = []
+        products_list = []
+        items_list = []
         for block in BLOCKCHAIN:
             for x in block.new_items:
-                if x['from'] in addr_items_dic:
-                    addr_items_dic[x['from']].append(x['item_id'])
-                else:
-                    addr_items_dic[x['from']] = [x['item_id']]
+                if new_txion['from'] == x['from']:
+                    items_list.append(x['item_id'])
             for x in block.new_places:
-                if x['from'] in addr_places_dic:
-                    addr_places_dic[x['from']].append(x['place_id'])
-                else:
-                    addr_places_dic[x['from']] = [x['place_id']]
-            for x in block.new_products:
-                addr_products_dic[x['from']] = x['product_id']
-                    
-        if new_txion['from'] not in addr_products_dic or new_txion['from'] not in addr_places_dic or new_txion['product_id'] not in addr_products_dic[new_txion['from']] or new_txion['place_id'] not in addr_places_dic[new_txion['from']]:
-            return 'Незарегестрированное место или предмет'
+                if new_txion['from'] == x['from']:
+                    places_list.append(x['place_id'])
+            for move in block.movements:
+                if move['from'] == new_txion['from']:
+                    products_list.append(move['product_id'])
 
+        if ('item_id' in new_txion.keys() and (new_txion['item_id'] not in items_list or new_txion['place_id'] not in places_list)) or\
+            ('item_id' not in new_txion.keys() and (new_txion['place_id'] not in places_list or new_txion['product_id'] not in products_list)):
+                return 'Незарегистрированное место или предмет'
+            
         if validate_signature(new_txion['from'], new_txion['signature'], new_txion['message']):
             NODE_PENDING_MOVEMENTS.append(new_txion)
             return 'Transaction submission successful\n'
@@ -167,55 +180,7 @@ def new_place():
     elif request.method == 'GET' and request.args.get('update') == MINER_ADDRESS:
         pending = json.dumps(ADDR_TO_PLACES, sort_keys=True)
         ADDR_TO_PLACES[:] = []
-        
-        return pending
-    
 
-@app.route('/new_product', methods=['GET', 'POST'])
-def new_product():
-    if request.method == 'POST':
-        
-        new_txion = request.get_json()
-        
-        addr_places_dic = {}
-        addr_items_dic = {}
-        addr_products_dic = {}
-        for block in BLOCKCHAIN:
-            for x in block.new_items:
-                if x['from'] in addr_items_dic:
-                    addr_items_dic[x['from']].append(x['item_id'])
-                else:
-                    addr_items_dic[x['from']] = [x['item_id']]
-            for x in block.new_places:
-                if x['from'] in addr_places_dic:
-                    addr_places_dic[x['from']].append(x['place_id'])
-                else:
-                    addr_places_dic[x['from']] = [x['place_id']]
-            for x in block.new_products:
-                addr_products_dic[x['from']] = x['product_id']
-                    
-        if  new_txion['from'] not in addr_items_dic or\
-                new_txion['from'] not in addr_places_dic or\
-                new_txion['item_id'] not in addr_items_dic[new_txion['from']] or\
-                new_txion['place_id'] not in addr_places_dic[new_txion['from']]:
-            return 'Незарегестрированное место или предмет'
-        
-        if new_txion['from'] in addr_products_dic:
-            new_txion['product_id'] = addr_products_dic[new_txion['from']] + 1
-        else:
-            new_txion['product_id'] = 1
-        
-        if validate_signature(new_txion['from'], new_txion['signature'], new_txion['message']):
-            ADDR_TO_PRODUCTS.append(new_txion)
-                
-            return 'Adding a product was ended successful\n'
-        else:
-            return 'Adding a product submission failed. Wrong signature'
-        
-    elif request.method == 'GET' and request.args.get('update') == MINER_ADDRESS:
-        pending = json.dumps(ADDR_TO_PRODUCTS, sort_keys=True)
-        ADDR_TO_PRODUCTS[:] = []
-        
         return pending
 
 
@@ -230,7 +195,7 @@ def new_item():
             return 'Adding a item was ended successful\n'
         else:
             return 'Adding a item submission failed. Wrong signature'
-    
+
     elif request.method == 'GET' and request.args.get('update') == MINER_ADDRESS:
         pending = json.dumps(ADDR_TO_ITEMS, sort_keys=True)
         ADDR_TO_ITEMS[:] = []
